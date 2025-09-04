@@ -20,12 +20,14 @@ pdf-rag/
 ## Setup
 
 1. Clone the repository:
+
 ```bash
 git clone <your-repo-url>
 cd pdf-rag
 ```
 
 2. Install dependencies:
+
 ```bash
 # Install server dependencies
 cd server
@@ -37,10 +39,12 @@ pnpm install
 ```
 
 3. Set up environment variables:
+
    - Copy `.env.example` to `.env` in both client and server directories
    - Fill in the required environment variables
 
 4. Start the services:
+
 ```bash
 # Start Docker containers (Redis and Qdrant)
 docker-compose up -d
