@@ -9,41 +9,56 @@ import "dotenv/config";
 const worker = new Worker(
   "file-upload-queue",
   async (job) => {
-    console.log("Worker received a job");
-    console.log(`Job data: ${job.data}`);
-    const data = JSON.parse(job.data);
-    const loader = new PDFLoader(data.path);
-    const docs = await loader.load();
-
-    const embeddings = new GoogleGenerativeAIEmbeddings({
-      apiKey: process.env.GOOGLE_API_KEY, // Or pass your key directly
-      model: "embedding-001", // Optional, default is "embedding-001"
-    });
-
-    const client = new QdrantClient({ url: process.env.QDRANT_URL });
-
-    // Check if collection exists, if not create it
     try {
-      await client.getCollection("pdf-docs");
-    } catch (e) {
-      // Collection doesn't exist, create it
-      await client.createCollection("pdf-docs", {
-        vectors: {
-          size: 768,
-          distance: "Cosine",
-        },
+      console.log("Worker received a job");
+      console.log(`Job data: ${job.data}`);
+      const data = JSON.parse(job.data);
+      const loader = new PDFLoader(data.path);
+      const rawDocs = await loader.load();
+      
+      // Split text into chunks
+      const textSplitter = new CharacterTextSplitter({
+        separator: "\n",
+        chunkSize: 1000,
+        chunkOverlap: 200,
       });
-    }
+      
+      const docs = await textSplitter.splitDocuments(rawDocs);
+      console.log(`Split into ${docs.length} chunks`);
 
-    const vectorStore = await QdrantVectorStore.fromExistingCollection(
-      embeddings,
-      {
-        url: process.env.QDRANT_URL,
-        collectionName: "pdf-docs",
+      const embeddings = new GoogleGenerativeAIEmbeddings({
+        apiKey: process.env.GOOGLE_API_KEY,
+        model: "embedding-001",
+      });
+
+      const client = new QdrantClient({ url: process.env.QDRANT_URL });
+
+      // Check if collection exists, if not create it
+      try {
+        await client.getCollection("pdf-docs");
+      } catch (e) {
+        // Collection doesn't exist, create it
+        await client.createCollection("pdf-docs", {
+          vectors: {
+            size: 768,
+            distance: "Cosine",
+          },
+        });
       }
-    );
-    await vectorStore.addDocuments(docs);
-    console.log("all docs added to vector store");
+
+      const vectorStore = await QdrantVectorStore.fromExistingCollection(
+        embeddings,
+        {
+          url: process.env.QDRANT_URL,
+          collectionName: "pdf-docs",
+        }
+      );
+      await vectorStore.addDocuments(docs);
+      console.log("all docs added to vector store");
+    } catch (error) {
+      console.error("Error processing document:", error);
+      throw error; // Re-throw to mark the job as failed
+    }
   },
   {
     concurrency: 100,
