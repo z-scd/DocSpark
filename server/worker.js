@@ -15,16 +15,50 @@ const worker = new Worker(
       const data = JSON.parse(job.data);
       const loader = new PDFLoader(data.path);
       const rawDocs = await loader.load();
-      
+
       // Split text into chunks
+      // Process and validate each document
+      const validDocs = rawDocs.filter(doc => {
+        if (!doc.pageContent || typeof doc.pageContent !== 'string') {
+          console.warn('Found invalid document, skipping:', doc);
+          return false;
+        }
+        return true;
+      }).map(doc => ({
+        ...doc,
+        pageContent: doc.pageContent
+          .replace(/\0/g, '') // Remove null bytes
+          .replace(/[\x00-\x1F\x7F-\x9F]/g, '') // Remove control characters
+          .trim()
+      }));
+
+      if (validDocs.length === 0) {
+        throw new Error('No valid text content found in PDF');
+      }
+
       const textSplitter = new CharacterTextSplitter({
         separator: "\n",
         chunkSize: 1000,
         chunkOverlap: 200,
       });
-      
-      const docs = await textSplitter.splitDocuments(rawDocs);
+
+      const docs = await textSplitter.splitDocuments(validDocs);
       console.log(`Split into ${docs.length} chunks`);
+      
+      // Validate chunks
+      const validChunks = docs.filter(doc => {
+        if (!doc.pageContent || doc.pageContent.trim().length === 0) {
+          console.warn('Found empty chunk, skipping');
+          return false;
+        }
+        return true;
+      });
+
+      if (validChunks.length === 0) {
+        throw new Error('No valid chunks found after splitting');
+      }
+      
+      console.log(`Processing ${validChunks.length} valid chunks`);
 
       const embeddings = new GoogleGenerativeAIEmbeddings({
         apiKey: process.env.GOOGLE_API_KEY,
@@ -53,8 +87,14 @@ const worker = new Worker(
           collectionName: "pdf-docs",
         }
       );
-      await vectorStore.addDocuments(docs);
-      console.log("all docs added to vector store");
+      // Add documents in smaller batches to avoid overwhelming the API
+      const batchSize = 5;
+      for (let i = 0; i < validChunks.length; i += batchSize) {
+        const batch = validChunks.slice(i, i + batchSize);
+        await vectorStore.addDocuments(batch);
+        console.log(`Processed batch ${Math.floor(i/batchSize) + 1} of ${Math.ceil(validChunks.length/batchSize)}`);
+      }
+      console.log("All documents successfully added to vector store");
     } catch (error) {
       console.error("Error processing document:", error);
       throw error; // Re-throw to mark the job as failed
