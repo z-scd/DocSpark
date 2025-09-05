@@ -1,5 +1,6 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
 import { Upload } from "lucide-react";
 import * as React from "react";
 
@@ -27,13 +28,16 @@ const FileUploadComponent: React.FC = () => {
   };
 
   return (
-    <div
-      className="bg-slate-900 text-white shadow-2xl flex justify-center items-center p-4 border border-rounded"
-      onClick={handleFileUploadButtonClick}
-    >
-      <h3>Upload Your PDF.</h3>
-      <Upload />
-    </div>
+    <>
+      <Input type="file" />
+      <div
+        className="bg-slate-900 text-white shadow-2xl flex justify-center items-center p-4 border border-rounded"
+        onClick={handleFileUploadButtonClick}
+      >
+        <h3>Upload Your PDF.</h3>
+        <Upload />
+      </div>
+    </>
   );
 };
 

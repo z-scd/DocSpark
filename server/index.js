@@ -48,38 +48,74 @@ app.post("/upload/pdf", upload.single("pdf"), async (req, res) => {
 });
 
 app.get("/chat", async (req, res) => {
-  const userQuery = req.query.message;
-  const embeddings = new GoogleGenerativeAIEmbeddings({
-    apiKey: process.env.GOOGLE_API_KEY, // Or pass your key directly
-    model: "embedding-001", // Optional, default is "embedding-001"
-  });
-  const vectorStore = await QdrantVectorStore.fromExistingCollection(
-    embeddings,
-    {
-      url: process.env.QDRANT_URL,
-      collectionName: "pdf-docs",
+  try {
+    const userQuery = req.query.message;
+
+    if (
+      !userQuery ||
+      typeof userQuery !== "string" ||
+      userQuery.trim().length === 0
+    ) {
+      return res.status(400).json({ error: "Invalid or empty query" });
     }
-  );
-  const ret = vectorStore.asRetriever({ k: 2 });
-  const result = await ret.invoke(userQuery);
 
-  const systemPrompt = `
-  Act as a supportive AI agent who helps answering questions from following context,
-  Context : ${JSON.stringify(result)}
-  `;
+    // Clean the query text
+    const cleanQuery = userQuery
+      .trim()
+      .replace(/\0/g, "") // Remove null bytes
+      .replace(/[\x00-\x1F\x7F-\x9F]/g, ""); // Remove control characters
 
-  const model = new ChatGoogle({
-    model: "gemma-3-27b-it",
-  });
+    const embeddings = new GoogleGenerativeAIEmbeddings({
+      apiKey: process.env.GOOGLE_API_KEY,
+      model: "embedding-001",
+      stripNewLines: true, // Add this to handle newlines
+    });
 
-  const chatResult = await model.invoke([
-    {
-      role: "user",
-      content: systemPrompt,
-    },
-  ]);
+    const vectorStore = await QdrantVectorStore.fromExistingCollection(
+      embeddings,
+      {
+        url: process.env.QDRANT_URL,
+        collectionName: "pdf-docs",
+      }
+    );
 
-  return res.json({ chatResult });
+    const ret = vectorStore.asRetriever({ k: 2 });
+    const result = await ret.invoke(cleanQuery);
+
+    const systemPrompt = `
+    Act as a supportive AI agent who helps answering questions from following context,
+    Context : ${JSON.stringify(result)}
+    Question: ${cleanQuery}
+    `;
+
+    const model = new ChatGoogle({
+      model: "gemma-3-27b-it",
+      apiKey: process.env.GOOGLE_API_KEY,
+    });
+
+    const chatResult = await model.invoke([
+      {
+        role: "system",
+        content:
+          "You are a helpful AI assistant that answers questions based on the provided context.",
+      },
+      {
+        role: "user",
+        content: systemPrompt,
+      },
+    ]);
+
+    return res.json({
+      message: chatResult,
+      docs: result,
+    });
+  } catch (error) {
+    console.error("Error in chat endpoint:", error);
+    return res.status(500).json({
+      error: "An error occurred while processing your request",
+      details: error.message,
+    });
+  }
 });
 
 app.listen(PORT, () => {
